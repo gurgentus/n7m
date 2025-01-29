@@ -48,6 +48,7 @@ if [ "$1" = 'setup' ]; then
   # https://stackoverflow.com/questions/14549270/check-if-database-exists-in-postgresql-using-shell
   if psql -lt | cut -d \| -f 1 | grep -qw nominatim; then
     echo "Database already exists"
+    # nominatim freeze
     exit 0
   else
     echo "Database has not been setup"

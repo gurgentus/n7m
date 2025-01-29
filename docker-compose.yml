@@ -1,6 +1,7 @@
 services:
   web:
     build: web
+    #image: ${DOCKER_REGISTRY}/dotwalk/n7m-web
     image: smithmicro/n7m-web
     restart: always
     ports:
@@ -11,39 +12,86 @@ services:
     mem_limit: 100m
   ui:
     build: ui
+    #image: ${DOCKER_REGISTRY}/dotwalk/n7m-ui    
     image: smithmicro/n7m-ui
     restart: always
     mem_limit: 100m
   api:
     build: api
+    #image: ${DOCKER_REGISTRY}/dotwalk/n7m-api
     image: smithmicro/n7m-api
     restart: always
     environment:
+      - PGHOST=gis
+      - PGUSER=postgres
       - PGPASSWORD=n7m-geocoding
       - WEB_CONCURRENCY=2
+      - NOMINATIM_QUERY_TIMEOUT=1200
+      - NOMINATIM_REQUEST_TIMEOUT=1200
     depends_on:
       - gis
-    mem_limit: 200m
+    ports:
+      - "8000:8000"
+    # mem_limit: 200m
   feed:
     build: feed
+    shm_size: 8g
+    #image: ${DOCKER_REGISTRY}/dotwalk/n7m-feed    
     image: smithmicro/n7m-feed
     depends_on:
       - gis
     environment:
+      - PGHOST=gis
+      - PGUSER=postgres
       - PGPASSWORD=n7m-geocoding
-      - OSM_FILENAME=monaco-latest.osm.pbf
-      - NOMINATIM_REPLICATION_URL=https://download.geofabrik.de/europe/monaco-updates
+      - THREADS=8
+      - OSM_FILENAME=planet-latest.osm.pbf
+      - NOMINATIM_FLATNODE_FILE=/data/flatnode.file
+      - NOMINATIM_REPLICATION_URL=https://planet.openstreetmap.org/replication/day
       - NOMINATIM_REPLICATION_MAX_DIFF=3000
       - NOMINATIM_REPLICATION_UPDATE_INTERVAL=86400
     volumes:
-      - ./data:/data/
+      - /mnt/ebs_large/data:/data/
   gis:
     build: gis
+    #image: ${DOCKER_REGISTRY}/dotwalk/n7m-gis    
     image: smithmicro/n7m-gis
     restart: always
     ports:
       - "5432:5432"
     environment:
+      - PGHOST=gis
+      - PGUSER=postgres
       - POSTGRES_PASSWORD=n7m-geocoding
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - NOMINATIM_QUERY_TIMEOUT=600
     volumes:
-      - ./pgdata:/var/lib/postgresql/data
+      - /mnt/efs/nominatim/pgdata:/var/lib/postgresql/data
+  graph:
+    build: graph
+    image: ${DOCKER_REGISTRY}/dotwalk/graphhopper    
+    #image: israelhikingmap/graphhopper
+    restart: always
+    ports:
+      - "8989:8989"
+    environment:
+      - JAVA_OPTS="-Xmx16g -Xms16g"
+    entrypoint: "./graphhopper.sh"
+    command: "--input /data/data/italy-latest.osm.pbf --host 0.0.0.0 --config /data/graphhopper/config.yml --graph-cache /data/graph-cache"
+    volumes:
+      - /mnt/ebs:/data
+  ors:
+    build: ors
+    image: ${DOCKER_REGISTRY}/dotwalk/ors
+    # image: openrouteservice/openrouteservice:v9.0.0
+    container_name: ors
+    ports:
+      - "8080:8082" 
+      - "9001:9001"
+    volumes: # Mount relative directories. ONLY for local container runtime. To switch to docker managed volumes see 'Docker Volumes configuration' section below.
+      - ./ors-docker:/home/ors  # Mount the ORS application directory (for logs, graphs, elevation_cache, etc.) into its own directory
+    environment:
+      REBUILD_GRAPHS: "False"  # Set to True to rebuild graphs on container start.
+      CONTAINER_LOG_LEVEL: INFO  # Log level for the container. Possible values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+      XMS: 1g  # start RAM assigned to java
+      XMX: 2g  # max RAM assigned to java. Rule of Thumb: <PBF-size> * <profiles> * 2
